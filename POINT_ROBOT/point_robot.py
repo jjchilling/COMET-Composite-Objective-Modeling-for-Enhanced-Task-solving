@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, Optional, Tuple, Union
 
+
 import chex
 from flax import struct
 import jax
@@ -33,7 +34,7 @@ class EnvParams(environment.EnvParams):
     max_steps_in_episode: int = 100  # Steps in an episode (constant goal)
 
 
-class PointRobot(environment.Environment):
+class PointRobot(environment.Environment[EnvState, EnvParams]):
     """2D Semi-Circle Point Robot environment similar to Dorfman et al.
 
 
@@ -63,7 +64,6 @@ class PointRobot(environment.Environment):
             key, params.circle_radius, params.center_init
         )
         # Sample/set new initial position if goal was reached
-        pos = jnp.squeeze(pos)
         new_pos = jax.lax.select(goal_reached, sampled_pos, pos)
         state = EnvState(
             last_action=action,
@@ -112,11 +112,7 @@ class PointRobot(environment.Environment):
         time_rep = jax.lax.select(
             params.normalize_time, time_normalization(state.time), state.time
         )
-        last_reward = state.last_reward.reshape(-1)  # Ensure it's a flat array
-        time_rep = jnp.array([time_normalization(state.time)] if params.normalize_time else state.time).reshape(-1)  # Also ensure it's flat
-        # Concatenate ensuring all are flat arrays
-        return jnp.concatenate([state.pos, last_reward, state.last_action, time_rep])
-        # return jnp.hstack([state.pos, last_reward, last_action, time_rep])
+        return jnp.hstack([state.pos, state.last_reward, state.last_action, time_rep])
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
         """Check whether state is terminal."""
