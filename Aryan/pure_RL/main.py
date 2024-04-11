@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
+from gymnax.visualize import Visualizer
 import numpy as np
 import optax
 import tqdm
@@ -12,7 +13,6 @@ import distrax
 
 from wrappers import (
     LogWrapper,
-    BraxGymnaxWrapper,
     GymnaxWrapper,
     VecEnv,
     NormalizeVecObservation,
@@ -124,6 +124,11 @@ def make_train(config):
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = env.reset(reset_rng, env_params)
         
+        
+        # state_seq, reward_seq = [], []
+        obsv, env_state = env.reset(reset_rng, env_params)
+        # state_seq.append(env_state)
+        
         pbar = tqdm.tqdm(total=config["NUM_UPDATES"], desc="Training")
 
         # TRAIN LOOP
@@ -136,7 +141,7 @@ def make_train(config):
 
                     # SELECT ACTION
                     rng, _rng = jax.random.split(rng)
-                    pi, value = network.apply(train_state.params, last_obs)
+                    pi, value = network.apply(train_state.params, last_obs) #this line and the next line for actions
                     action = pi.sample(seed=_rng)
                     log_prob = pi.log_prob(action)
 
@@ -147,10 +152,12 @@ def make_train(config):
                         rng_step, env_state, action, env_params
                     )
                     
+                    # env.render(env_state, env_params)
                     # Print relevant variables
                     print("Reward: ", jax.device_get(reward))
                     # print("Done:", done)
                     # print("Info:", info)
+                    # reward_seq.append(reward)
                     transition = Transition(
                         done, action, value, reward, log_prob, last_obs, info
                     )
@@ -292,6 +299,8 @@ def make_train(config):
 
                 runner_state = (train_state, env_state, last_obs, rng)
                 return runner_state, metric
+            # state_seq.append(env_state)
+            # reward_seq.append(reward)
             pbar.update(1)
 
         pbar.close()
@@ -300,6 +309,9 @@ def make_train(config):
         runner_state, metric = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
+        # cum_rewards = jnp.cumsum(jnp.array(reward_seq))
+        # vis = Visualizer(env, env_params, state_seq, cum_rewards)
+        # vis.animate("docs/anim.gif")  # Save animation
         return {"runner_state": runner_state, "metrics": metric}
 
     return train
@@ -310,7 +322,7 @@ if __name__ == "__main__":
         "LR": 3e-4,
         "NUM_ENVS": 2048,
         "NUM_STEPS": 10,
-        "TOTAL_TIMESTEPS": 5e7,
+        "TOTAL_TIMESTEPS": 5e7 ,
         "UPDATE_EPOCHS": 4,
         "NUM_MINIBATCHES": 32,
         "GAMMA": 0.99,
@@ -334,9 +346,98 @@ if __name__ == "__main__":
     out = train_jit(rng)
     print("Reached here 5")
     import matplotlib.pyplot as plt
-    print(out['metrics']['returned_episode'])
+    # print(out['metrics']['returned_episode'])
     # print(out["metrics"]["returned_episode_returns"])
     plt.plot(out["metrics"]["returned_episode_returns"].mean(-1).reshape(-1))
     plt.xlabel("Updates")
     plt.ylabel("Return")
     plt.show()
+    
+    # env, env_params = gymnax.make(config["ENV_NAME"]);
+    # network = ActorCritic(env.action_space(env_params).shape[0], activation=config["ACTIVATION"])
+    # network_params = out['runner_state'][0].params
+    # for _ in range(5):
+    #     obs = env.reset(env_params)
+    #     done = False
+    #     episode_return = 0
+    #     while not done:
+    #         pi, _ = network.apply(network_params, obs)
+    #         action = pi.sample(seed=np.random.randint(0, 1000))  # Sample action
+    #         obs, reward, done, _ = env.step(action, env_params)
+    #         episode_return += reward
+    #         env.render()
+    #     print("Episode return:", episode_return)
+    # env.close()  # Close the environment after visualization
+    
+    # Visualize the environment after training
+    # env, _ = gymnax.make(config["ENV_NAME"])
+    # env_params = env.default_params()
+
+    # # Initialize the agent with the trained parameters
+    # network = ActorCritic(env.action_space(env_params).shape[0], activation=config["ACTIVATION"])
+    # network_params = out['runner_state'][0].params
+
+    # # Run for 5 episodes
+    # for _ in range(5):
+    #     obs, env_state = env.reset(env_params)
+    #     done = False
+    #     episode_return = 0
+    #     while not done:
+    #         pi, _ = network.apply(network_params, obs)
+    #         action = pi.sample(seed=np.random.randint(0, 1000))  # Sample action
+    #         obs, reward, done, _ = env.step(action, env_params, env_state)
+    #         episode_return += reward
+    #         env.render()
+    #     print("Episode return:", episode_return)
+    # env.close()  # Close the environment after visualization
+    
+    # rng = jax.random.PRNGKey(0)
+    # env, env_params = gymnax.make("PointRobot-misc")
+
+    # state_seq, reward_seq = [], []
+    # rng, rng_reset = jax.random.split(rng)
+    # obs, env_state = env.reset(rng_reset, env_params)
+    # while True:
+    #     state_seq.append(env_state)
+    #     rng, rng_act, rng_step = jax.random.split(rng, 3)
+    #     action = env.action_space(env_params).sample(rng_act) #replace this with the model params
+    #     next_obs, next_env_state, reward, done, info = env.step(
+    #         rng_step, env_state, action, env_params
+    #     )
+    #     reward_seq.append(reward)
+    #     if done:
+    #         break
+    #     else:
+    #         obs = next_obs
+    #         env_state = next_env_state
+
+    # cum_rewards = jnp.cumsum(jnp.array(reward_seq))
+    # vis = Visualizer(env, env_params, state_seq, cum_rewards)
+    # vis.animate("anim.gif")
+    env, env_params = gymnax.make(config["ENV_NAME"])
+    network = ActorCritic(env.action_space(env_params).shape[0], activation=config["ACTIVATION"])
+    network_params = out['runner_state'][0].params
+
+    # Run the visualization loop
+    state_seq, reward_seq = [], []
+    rng, rng_reset = jax.random.split(rng)
+    obsv, env_state = env.reset(rng_reset, env_params)
+    while True:
+        state_seq.append(env_state)
+        # Use the policy network to sample actions
+        pi, _ = network.apply(network_params, obsv)
+        action = pi.sample(seed=rng)  # Sample action using the policy network
+        next_obs, next_env_state, reward, done, info = env.step(
+            rng, env_state, action, env_params
+        )
+        reward_seq.append(reward)
+        if done:
+            break
+        else:
+            obsv = next_obs
+            env_state = next_env_state
+
+    # Visualize the environment
+    cum_rewards = jnp.cumsum(jnp.array(reward_seq))
+    vis = Visualizer(env, env_params, state_seq, cum_rewards)
+    vis.animate("Aryan_anim.gif")
