@@ -112,14 +112,64 @@ def make_train(config):
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0,0,0,None))(
+                obsv, env_state, reward, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
+
+                # Define waypoints
+                waypoints = jnp.array([
+                    [1, 0],  # Move right
+                    [1, 1],  # Move up
+                    [0, 1],  # Move left
+                    [0, 0]   # Move down
+                ])
+                current_waypoint_index = env_state.waypoint_index
+
+                # Calculate the distance to the current waypoint
+                current_waypoint = waypoints[current_waypoint_index]
+                distance_to_waypoint = jnp.linalg.norm(obsv['pos'] - current_waypoint)
+
+                # Reward based on proximity to the waypoint
+                waypoint_reward = -distance_to_waypoint
+
+                # Check if waypoint is reached, switch to the next waypoint
+                if distance_to_waypoint < 0.1:  # Threshold for reaching a waypoint
+                    waypoint_reward += 50  # Bonus reward for reaching a waypoint
+                    current_waypoint_index = (current_waypoint_index + 1) % 4  # Cycle through waypoints
+                    env_state = env_state.replace(waypoint_index=current_waypoint_index)  # Update state
+
+                # Modify the original reward from the environment
+                reward += waypoint_reward  # Combine environment reward with waypoint logic
+
                 transition = Transition(
                     done, action, value, reward, log_prob, last_obs, info
                 )
                 runner_state = (train_state, env_state, obsv, rng)
                 return runner_state, transition
+
+                #ORIGINAL
+                # train_state, env_state, last_obs, rng = runner_state
+
+                # # SELECT ACTION
+                # rng, _rng = jax.random.split(rng)
+                # pi, value = network.apply(train_state.params, last_obs)
+                # action = pi.sample(seed=_rng)
+                # log_prob = pi.log_prob(action)
+
+                # # STEP ENV
+                # rng, _rng = jax.random.split(rng)
+                # rng_step = jax.random.split(_rng, config["NUM_ENVS"])
+                # obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0,0,0,None))(
+                #     rng_step, env_state, action, env_params
+                # )
+
+                # transition = Transition(
+                #     done, action, value, reward, log_prob, last_obs, info
+                # )
+                # runner_state = (train_state, env_state, obsv, rng)
+                # return runner_state, transition
+
+                #ORIGINAL
 
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]

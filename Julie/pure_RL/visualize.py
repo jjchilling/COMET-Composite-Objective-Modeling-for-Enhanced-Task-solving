@@ -13,6 +13,7 @@ from gymnax.visualize import vis_gym
 from gymnax.visualize import vis_maze
 from gymnax.visualize import vis_minatar
 
+# Trace the path that the point robot has been.
 
 class Visualizer(object):
     """Visualizer for Gymnax environments."""

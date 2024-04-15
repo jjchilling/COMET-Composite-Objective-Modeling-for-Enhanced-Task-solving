@@ -1,10 +1,13 @@
+from openai import OpenAI
+
+client = OpenAI(api_key="")
+
+message_with_code = """
+I am implementing an RL project in PointRobot environment in Gymnax. Please write detailed reward function in jax that makes the agent fly in a rectangle shape:
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from flax import struct
-import chex
 import numpy as np
-from gymnax.environments import environment
 import optax
 import tqdm
 import gymnax
@@ -28,25 +31,6 @@ from wrappers import (
     NormalizeVecReward,
     ClipAction,
 )
-
-@struct.dataclass
-class EnvState(environment.EnvState):
-    last_action: chex.Array
-    last_reward: jnp.ndarray
-    pos: chex.Array
-    goal: chex.Array
-    goals_reached: int
-    time: float
-
-@struct.dataclass
-class EnvParams(environment.EnvParams):
-    max_force: float = 0.1
-    circle_radius: float = 1.0
-    dense_reward: bool = False
-    goal_radius: float = 0.2
-    center_init: bool = False
-    normalize_time: bool = True
-    max_steps_in_episode: int = 100
 
 
 class ActorCritic(nn.Module):
@@ -400,3 +384,13 @@ if __name__ == "__main__":
     cum_rewards = jnp.cumsum(jnp.array(reward_seq))
     vis = Visualizer(env, env_params, state_seq, cum_rewards)
     vis.animate("Julie_anim.gif")
+
+"""
+
+
+
+# create a chat completion
+chat_completion = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": message_with_code}])
+
+# print the chat completion
+print(chat_completion.choices[0].message.content)
