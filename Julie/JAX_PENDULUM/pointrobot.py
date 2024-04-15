@@ -62,7 +62,7 @@ class PointRobot(environment.Environment[EnvState, EnvParams]):
         reward = jax.lax.select(params.dense_reward, -goal_distance, goal_reached * 1.0)
         sampled_pos = sample_agent_position(
             key, params.circle_radius, params.center_init
-        )
+        )[0]  # Ensure sampled_pos is a 1-dimensional array
         # Sample/set new initial position if goal was reached
         new_pos = jax.lax.select(goal_reached, sampled_pos, pos)
         state = EnvState(
@@ -82,6 +82,7 @@ class PointRobot(environment.Environment[EnvState, EnvParams]):
             done,
             {"discount": self.discount(state, params)},
         )
+
 
     def reset_env(
         self, key: chex.PRNGKey, params: EnvParams
@@ -190,6 +191,26 @@ def time_normalization(
     """Normalize time integer into range given max time."""
     return (max_lim - min_lim) * t / t_max + min_lim
 
+
+# def sample_agent_position(
+#     key: chex.PRNGKey, circle_radius: float, center_init: bool
+# ) -> chex.Array:
+#     """Sample a random position in circle (or set position to center)."""
+#     rng_radius, rng_angle = jax.random.split(key)
+#     sampled_radius = jax.random.uniform(rng_radius, minval=0, maxval=circle_radius)
+#     sampled_angle = jax.random.uniform(rng_angle, minval=0, maxval=jnp.pi)
+
+#     pos = jax.lax.select(
+#         center_init,
+#         jnp.zeros(2),
+#         jnp.array(
+#             [
+#                 sampled_radius * jnp.cos(sampled_angle),
+#                 sampled_radius * jnp.sin(sampled_angle),
+#             ]
+#         ),
+#     )
+#     return pos
 
 def sample_agent_position(
     key: chex.PRNGKey, circle_radius: float, center_init: bool

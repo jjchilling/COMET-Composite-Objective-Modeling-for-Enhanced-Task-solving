@@ -45,6 +45,44 @@ class PointRobot(environment.Environment[EnvState, EnvParams]):
     def default_params(self) -> EnvParams:
         # Default environment parameters
         return EnvParams()
+    
+    # @staticmethod
+    # def calculate_rectangle(state: EnvState, params: EnvParams, action: chex.Array) -> float:
+    #     """Calculate the reward for moving towards the next corner of a predefined rectangle."""
+    #     rectangle_corners = jnp.array([
+    #         [0, 0],
+    #         [1, 0],
+    #         [1, 1],
+    #         [0, 1]
+    #     ])
+
+    #     distances_to_corners = jnp.sqrt(jnp.sum((state.pos - rectangle_corners) ** 2, axis=1))
+    #     nearest_corner_index = jnp.argmin(distances_to_corners)
+    #     nearest_corner_distance = distances_to_corners[nearest_corner_index]
+    #     target_corner_index = (nearest_corner_index + 1) % 4
+    #     target_corner = lax.dynamic_index_in_dim(rectangle_corners, target_corner_index, keepdims=False)
+    #     distance_to_next_corner = jnp.linalg.norm(state.pos - target_corner)
+
+    #     base_reward = -distance_to_next_corner  # Negative distance as penalty
+
+    #     def add_corner_reward(carry):
+    #         reward, _ = carry
+    #         return reward + 10, None
+
+    #     def no_corner_reward(carry):
+    #         reward, _ = carry
+    #         return reward, None
+
+    #     reward, _ = jax.lax.cond(
+    #         nearest_corner_distance < params.goal_radius,
+    #         add_corner_reward,
+    #         no_corner_reward,
+    #         (base_reward, None)
+    #     )
+
+    #     reward -= 0.1 * state.time  # Apply time penalty
+    #     return reward
+
 
     def step_env(
         self,
@@ -53,28 +91,68 @@ class PointRobot(environment.Environment[EnvState, EnvParams]):
         action: Union[int, float, chex.Array],
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
-        """Sample bernoulli reward, increase counter, construct input."""
+
         a = jnp.clip(action, -params.max_force, params.max_force)
         pos = state.pos + a
-        goal_distance = jnp.linalg.norm(state.goal - state.pos)
-        goal_reached = goal_distance <= params.goal_radius
-        # Dense reward - distance to goal, sparse reward - 1 if in radius
-        reward = jax.lax.select(params.dense_reward, -goal_distance, goal_reached * 1.0)
+
+        # Use the rectangle reward function
+
+        rectangle_corners = jnp.array([
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 1]
+        ])
+
+        distances_to_corners = jnp.sqrt(jnp.sum((state.pos - rectangle_corners) ** 2, axis=1))
+        nearest_corner_index = jnp.argmin(distances_to_corners)
+        nearest_corner_distance = distances_to_corners[nearest_corner_index]
+        target_corner_index = (nearest_corner_index + 1) % 4
+        target_corner = lax.dynamic_index_in_dim(rectangle_corners, target_corner_index, keepdims=False)
+        distance_to_next_corner = jnp.linalg.norm(state.pos - target_corner)
+
+        base_reward = -distance_to_next_corner  # Negative distance as penalty
+
+        def add_corner_reward(carry):
+            reward, _ = carry
+            return reward + 10, None
+
+        def no_corner_reward(carry):
+            reward, _ = carry
+            return reward, None
+
+        reward, _ = jax.lax.cond(
+            nearest_corner_distance < params.goal_radius,
+            add_corner_reward,
+            no_corner_reward,
+            (base_reward, None)
+        )
+
+        reward -= 0.1 * state.time  # Apply time penalty
+
+        # reward = calculate_rectangle(state, params, action)
+
+        # Update position: reset to initial if goal reached or continue from current
+        goal_reached = jnp.linalg.norm(pos - state.goal) <= params.goal_radius
         sampled_pos = sample_agent_position(
             key, params.circle_radius, params.center_init
         )
-        # Sample/set new initial position if goal was reached
         new_pos = jax.lax.select(goal_reached, sampled_pos, pos)
+
+        # Update state with new position and incremented goal count and time
         state = EnvState(
-            last_action=action,
-            last_reward=reward,
-            pos=new_pos,
-            goal=state.goal,
-            goals_reached=state.goals_reached + goal_reached,
-            time=state.time + 1,
+            action,
+            reward,
+            new_pos,
+            state.goal,
+            state.goals_reached + goal_reached,
+            state.time + 1,
         )
 
+        # Check if the episode should terminate
         done = self.is_terminal(state, params)
+
+        # Return observation, new state, reward, termination flag, and info
         return (
             lax.stop_gradient(self.get_obs(state, params)),
             lax.stop_gradient(state),
@@ -82,6 +160,40 @@ class PointRobot(environment.Environment[EnvState, EnvParams]):
             done,
             {"discount": self.discount(state, params)},
         )
+
+        
+        #ORIGINAL
+        # """Sample bernoulli reward, increase counter, construct input."""
+        # a = jnp.clip(action, -params.max_force, params.max_force)
+        # pos = state.pos + a
+        # goal_distance = jnp.linalg.norm(state.goal - state.pos)
+        # goal_reached = goal_distance <= params.goal_radius
+        # # Dense reward - distance to goal, sparse reward - 1 if in radius
+        # reward = jax.lax.select(params.dense_reward, -goal_distance, goal_reached * 1.0)
+        # sampled_pos = sample_agent_position(
+        #     key, params.circle_radius, params.center_init
+        # )[0]  # Ensure sampled_pos is a 1-dimensional array
+        # # Sample/set new initial position if goal was reached
+        # new_pos = jax.lax.select(goal_reached, sampled_pos, pos)
+        # state = EnvState(
+        #     last_action=action,
+        #     last_reward=reward,
+        #     pos=new_pos,
+        #     goal=state.goal,
+        #     goals_reached=state.goals_reached + goal_reached,
+        #     time=state.time + 1,
+        # )
+
+        # done = self.is_terminal(state, params)
+        # return (
+        #     lax.stop_gradient(self.get_obs(state, params)),
+        #     lax.stop_gradient(state),
+        #     reward,
+        #     done,
+        #     {"discount": self.discount(state, params)},
+        # )
+
+
 
     def reset_env(
         self, key: chex.PRNGKey, params: EnvParams
@@ -182,6 +294,8 @@ class PointRobot(environment.Environment[EnvState, EnvParams]):
         )
         ax.add_artist(circle)
         return fig, ax
+    
+
 
 
 def time_normalization(
@@ -189,7 +303,6 @@ def time_normalization(
 ) -> float:
     """Normalize time integer into range given max time."""
     return (max_lim - min_lim) * t / t_max + min_lim
-
 
 def sample_agent_position(
     key: chex.PRNGKey, circle_radius: float, center_init: bool
@@ -210,3 +323,4 @@ def sample_agent_position(
         ),
     )
     return pos
+
