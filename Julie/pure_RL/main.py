@@ -14,9 +14,24 @@ from flax.training.train_state import TrainState
 import distrax
 from visualize import Visualizer
 from ppo import make_train
+import pickle
 # from jax.config import config
 
 # config.update('jax_disable_jit', True)
+
+
+
+def to_numpy_structure(obj):
+    # This uses jax.numpy.ndarray to check if it's a JAX-managed numpy array.
+    if isinstance(obj, jax.numpy.ndarray):
+        return np.array(jax.device_get(obj))
+    elif isinstance(obj, dict):
+        return {k: to_numpy_structure(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [to_numpy_structure(v) for v in obj]
+    elif isinstance(obj, tuple) and hasattr(obj, '_fields'):  # This is a namedtuple
+        return type(obj)(*map(to_numpy_structure, obj))
+    return obj
 
 
 from wrappers import (
@@ -28,6 +43,9 @@ from wrappers import (
     NormalizeVecReward,
     ClipAction,
 )
+
+def to_numpy(jax_array):
+    return np.array(jax.device_get(jax_array))
 
 @struct.dataclass
 class EnvState(environment.EnvState):
@@ -98,7 +116,7 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def make_train(config):
+def make_train(config, env_state, env_params):
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
@@ -107,7 +125,11 @@ def make_train(config):
     )
     # env, env_params = BraxGymnaxWrapper(config["ENV_NAME"]), None
     # env = GymnaxWrapper(config["ENV_NAME"])
-    env, env_params = gymnax.make(config["ENV_NAME"])
+    env, _ = gymnax.make(config["ENV_NAME"])
+    # # Load the environment parameters
+
+
+
     env = LogWrapper(env)
     env = ClipAction(env)
     env = VecEnv(env)
@@ -141,17 +163,21 @@ def make_train(config):
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
                 optax.adam(config["LR"], eps=1e-5),
             )
+
+
+
         train_state = TrainState.create(
             apply_fn=network.apply,
             params=network_params,
             tx=tx,
         )
-
+ 
         # INIT ENV
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = env.reset(reset_rng, env_params)
-        
+
+    
         pbar = tqdm.tqdm(total=config["NUM_UPDATES"], desc="Training")
 
         # TRAIN LOOP
@@ -328,17 +354,27 @@ def make_train(config):
         runner_state, metric = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
+        
         return {"runner_state": runner_state, "metrics": metric, "final_env_state": env_state}
-
+    
+   
     return env, env_params, train
 
 
 if __name__ == "__main__":
+
+    with open('final_env_params.pkl', 'rb') as f:
+        env_params = pickle.load(f)
+
+    with open('final_env_state.pkl', 'rb') as f:
+        env_state = pickle.load(f)
+
+
     config = {
         "LR": 3e-4,
         "NUM_ENVS": 2048,
         "NUM_STEPS": 10,
-        "TOTAL_TIMESTEPS": 5e7,
+        "TOTAL_TIMESTEPS": 1e7,
         "UPDATE_EPOCHS": 4,
         "NUM_MINIBATCHES": 32,
         "GAMMA": 0.99,
@@ -356,13 +392,27 @@ if __name__ == "__main__":
     print("Reached here 1")
     rng = jax.random.PRNGKey(30)
     print("Reached here 2")
-
-    env, env_params, train = make_train(config)
+    
+    env, env_params, train = make_train(config, env_state, env_params)
 
     # print(env_state)
     train_jit = jax.jit(train)
     print("Reached here 3")
     out = train_jit(rng)
+
+    final_runner_state = out['runner_state']
+    final_env_state = out['final_env_state']
+    final_train_state = final_runner_state[0]
+
+    # final_env_state_np = to_numpy_structure(final_env_state)
+    # env_params_np = to_numpy_structure(env_params)
+
+
+    # with open('final_env_params.pkl', 'wb') as f:
+    #     pickle.dump(env_params_np, f)
+
+    # with open('final_env_state.pkl', 'wb') as f:
+    #     pickle.dump(final_env_state_np, f)
 
     print("Reached here 5")
     import matplotlib.pyplot as plt
@@ -396,7 +446,6 @@ if __name__ == "__main__":
             obsv = next_obs
             env_state = next_env_state
 
-    # Visualize the environment
     cum_rewards = jnp.cumsum(jnp.array(reward_seq))
     vis = Visualizer(env, env_params, state_seq, cum_rewards)
     vis.animate("Julie_anim.gif")
