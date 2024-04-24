@@ -116,7 +116,7 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def make_train(config, env_state, env_params):
+def make_train(config):
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
@@ -125,7 +125,7 @@ def make_train(config, env_state, env_params):
     )
     # env, env_params = BraxGymnaxWrapper(config["ENV_NAME"]), None
     # env = GymnaxWrapper(config["ENV_NAME"])
-    env, _ = gymnax.make(config["ENV_NAME"])
+    env, env_params = gymnax.make(config["ENV_NAME"])
     # # Load the environment parameters
 
 
@@ -152,6 +152,9 @@ def make_train(config, env_state, env_params):
         )
         rng, _rng = jax.random.split(rng)
         init_x = jnp.zeros(env.observation_space(env_params).shape)
+
+        with open('network_params.pkl', 'rb') as f:
+            network_params = pickle.load(f)
         network_params = network.init(_rng, init_x)
         if config["ANNEAL_LR"]:
             tx = optax.chain(
@@ -177,7 +180,6 @@ def make_train(config, env_state, env_params):
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = env.reset(reset_rng, env_params)
 
-    
         pbar = tqdm.tqdm(total=config["NUM_UPDATES"], desc="Training")
 
         # TRAIN LOOP
@@ -363,11 +365,11 @@ def make_train(config, env_state, env_params):
 
 if __name__ == "__main__":
 
-    with open('final_env_params.pkl', 'rb') as f:
-        env_params = pickle.load(f)
+    # with open('final_env_params.pkl', 'rb') as f:
+    #     env_params = pickle.load(f)
 
-    with open('final_env_state.pkl', 'rb') as f:
-        env_state = pickle.load(f)
+    # with open('final_env_state.pkl', 'rb') as f:
+    #     env_state = pickle.load(f)
 
 
     config = {
@@ -393,7 +395,7 @@ if __name__ == "__main__":
     rng = jax.random.PRNGKey(30)
     print("Reached here 2")
     
-    env, env_params, train = make_train(config, env_state, env_params)
+    env, env_params, train = make_train(config)
 
     # print(env_state)
     train_jit = jax.jit(train)
@@ -432,9 +434,18 @@ if __name__ == "__main__":
     state_seq, reward_seq = [], []
     rng, rng_reset = jax.random.split(rng)
     obsv, env_state = env.reset(rng_reset, env_params)
+
+    with open('network_params.pkl', 'wb') as f:
+        pickle.dump(network_params, f)
+
+    with open('pi.pkl', 'wb') as f:
+        pi, _ = network.apply(network_params, obsv)
+        pickle.dump(pi, f)
+
     while True:
         state_seq.append(env_state)
         pi, _ = network.apply(network_params, obsv)
+
         action = pi.sample(seed=rng)  # Sample action using the policy network
         next_obs, next_env_state, reward, done, info = env.step(
             rng, env_state, action, env_params
@@ -448,4 +459,4 @@ if __name__ == "__main__":
 
     cum_rewards = jnp.cumsum(jnp.array(reward_seq))
     vis = Visualizer(env, env_params, state_seq, cum_rewards)
-    vis.animate("Julie_anim.gif")
+    vis.animate("Julie_loaded_anim.gif")
